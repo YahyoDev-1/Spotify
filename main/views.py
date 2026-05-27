@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, get_object_or_404
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
+from rest_framework import filters
 from .models import *
 from .serializers import *
 
@@ -12,7 +13,7 @@ from .serializers import *
 class SingerViewSet(ModelViewSet):
     queryset = Singer.objects.all()
     serializer_class = SingerSerializer
-
+ 
     def get_serializer_class(self):
         # Action nomlariga qarab to'g'ri serializerlarni qaytaramiz
         if self.action in ['albums', 'add_album']:
@@ -46,11 +47,20 @@ class SingerViewSet(ModelViewSet):
 class SongViewSet(ModelViewSet):
     queryset = Song.objects.all()
     serializer_class = SongSerializer
+    filter_backends = (filters.SearchFilter, filters.OrderingFilter)
+    search_fields = ('name',)
+    ordering_fields = ('duration',)
+    filterset_fields = ('genre', 'album')
 
 
 class AlbumViewSet(ModelViewSet):
     queryset = Album.objects.all()
     serializer_class = AlbumSerializer
+
+    def get_serializer_class(self):
+        if self.action in ['songs', 'add_song']:
+            return SongSerializer
+        return AlbumSerializer
 
     @action(methods=['get'], detail=True)
     def songs(self, request, pk):
