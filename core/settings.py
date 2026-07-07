@@ -170,6 +170,25 @@ REST_FRAMEWORK = {
     },
 }
 
+# Kesh: .env'da REDIS_URL berilsa — Redis (production),
+# berilmasa — jarayon xotirasidagi LocMemCache (development).
+# Kod ikkalasida ham bir xil ishlaydi, faqat backend almashadi.
+REDIS_URL = os.getenv('REDIS_URL', '')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'spotify-cache',
+        }
+    }
+
 # Testlarda parolni tez (MD5) hash'laymiz — PBKDF2 ataylab sekin,
 # har bir create_user testni ~100ms ga sekinlashtiradi.
 # Bu FAQAT test rejimiga ta'sir qiladi, real baza xavfsiz qoladi.

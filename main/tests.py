@@ -259,3 +259,80 @@ class FollowTests(CatalogFixtureMixin, APITestCase):
 
         names = [s['name'] for s in response.json()['results']]
         self.assertEqual(names, ['Sherali Jorayev'])
+
+
+class CacheTests(CatalogFixtureMixin, APITestCase):
+    """Cache-aside va invalidatsiya stsenariylari"""
+
+    def test_song_list_served_from_cache(self):
+        """Ikkinchi so'rov keshdan keladi — bazadagi 'yashirin' o'zgarishni ko'rmaydi"""
+        self.client.get('/songs/')  # keshni to'ldiramiz
+
+        # queryset.update() signal YUBORMAYDI — kesh bexabar qoladi.
+        # Bu keshdan o'qilayotganini isbotlash uchun ataylab qilingan hiyla.
+        Song.objects.filter(id=self.song1.id).update(name='Yashirin nom')
+
+        response = self.client.get('/songs/')
+
+        names = [s['name'] for s in response.json()['results']]
+        self.assertIn('Bandaman', names)  # hali ham eski nom — demak keshdan!
+        self.assertNotIn('Yashirin nom', names)
+
+    def test_new_song_invalidates_cache(self):
+        """create() signal orqali versiyani oshiradi — ro'yxat yangilanadi"""
+        self.client.get('/songs/')  # keshni to'ldiramiz
+
+        Song.objects.create(
+            name='Yangi qoshiq', genre=self.genre, album=self.album,
+            duration=datetime.timedelta(minutes=4),
+        )
+
+        response = self.client.get('/songs/')
+
+        self.assertEqual(response.json()['count'], 3)  # yangi qo'shiq ko'rindi
+
+    def test_like_invalidates_song_cache(self):
+        """Like bosilsa likes_count keshda eskirib qolmasligi kerak"""
+        self.client.get('/songs/')  # keshda likes_count=0
+
+        Like.objects.create(user=self.other, song=self.song1)
+
+        response = self.client.get('/songs/')
+
+        song = next(s for s in response.json()['results'] if s['id'] == self.song1.id)
+        self.assertEqual(song['likes_count'], 1)
+
+    def test_popular_returns_most_liked_first(self):
+        Like.objects.create(user=self.owner, song=self.song2)
+        Like.objects.create(user=self.other, song=self.song2)
+        Like.objects.create(user=self.owner, song=self.song1)
+
+        response = self.client.get('/songs/popular/')
+
+        names = [s['name'] for s in response.json()]
+        self.assertEqual(names[0], "O'zbegim")  # 2 like — birinchi o'rinda
+        self.assertEqual(names[1], 'Bandaman')
+
+    def test_genre_list_cache_invalidated_on_create(self):
+        self.client.get('/genres/')  # keshni to'ldiramiz
+
+        Genre.objects.create(name='Jazz')
+
+        response = self.client.get('/genres/')
+
+        names = [g['name'] for g in response.json()['results']]
+        self.assertIn('Jazz', names)
+
+    def test_different_querystrings_cached_separately(self):
+        """?genre=X filtri "hammasi" keshiga aralashib ketmasligi kerak"""
+        rock = Genre.objects.create(name='Rock')
+        Song.objects.create(
+            name='Rock qoshiq', genre=rock, album=self.album,
+            duration=datetime.timedelta(minutes=3),
+        )
+
+        all_response = self.client.get('/songs/')
+        filtered_response = self.client.get(f'/songs/?genre={rock.id}')
+
+        self.assertEqual(all_response.json()['count'], 3)
+        self.assertEqual(filtered_response.json()['count'], 1)

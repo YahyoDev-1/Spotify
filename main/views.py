@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.db.models import Count, Q
 from rest_framework import status
 from rest_framework.decorators import action
@@ -6,6 +7,13 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from .cache import (
+    SONGS_TTL,
+    GENRES_TTL,
+    songs_list_key,
+    songs_popular_key,
+    genres_list_key,
+)
 from .models import Genre, Singer, Album, Song, Playlist, PlaylistSong, Like, Follow
 from .permissions import IsOwnerOrReadOnly
 from .serializers import (
@@ -21,6 +29,18 @@ class GenreViewSet(ModelViewSet):
     queryset = Genre.objects.all()
     serializer_class = GenreSerializer
     search_fields = ('name',)
+
+    def list(self, request, *args, **kwargs):
+        # Cache-aside: avval keshdan qidiramiz
+        key = genres_list_key(request.GET.urlencode())
+        data = cache.get(key)
+        if data is None:
+            # Cache miss — bazadan olib, keshga yozib qo'yamiz
+            response = super().list(request, *args, **kwargs)
+            cache.set(key, response.data, GENRES_TTL)
+            return response
+        # Cache hit — bazaga umuman bormaymiz
+        return Response(data)
 
 
 class SingerViewSet(ModelViewSet):
@@ -103,6 +123,29 @@ class SongViewSet(ModelViewSet):
     search_fields = ('name',)
     ordering_fields = ('duration', 'name', 'created_at')
     filterset_fields = ('genre', 'album')
+
+    def list(self, request, *args, **kwargs):
+        # Cache-aside: kalit ichida querystring bor — har xil qidiruv/filter/sahifa
+        # alohida keshlanadi ("?genre=1" bilan "?search=x" aralashib ketmaydi)
+        key = songs_list_key(request.GET.urlencode())
+        data = cache.get(key)
+        if data is None:
+            response = super().list(request, *args, **kwargs)
+            cache.set(key, response.data, SONGS_TTL)
+            return response
+        return Response(data)
+
+    # GET /songs/popular/ — eng ko'p like olgan 10 ta qo'shiq
+    @action(methods=['get'], detail=False)
+    def popular(self, request):
+        key = songs_popular_key()
+        data = cache.get(key)
+        if data is None:
+            # Og'ir so'rov: JOIN + COUNT + ORDER — aynan keshlash uchun yaralgan
+            songs = self.get_queryset().order_by('-likes_count', 'name')[:10]
+            data = self.get_serializer(songs, many=True).data
+            cache.set(key, data, SONGS_TTL)
+        return Response(data)
 
     # POST /songs/{id}/like/ — yoqtirish, DELETE — bekor qilish
     @action(
