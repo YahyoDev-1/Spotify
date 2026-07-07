@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -168,6 +169,12 @@ REST_FRAMEWORK = {
         'register': '10/hour', # bitta IP'dan ommaviy akkaunt ochishga qarshi
     },
 }
+
+# Testlarda parolni tez (MD5) hash'laymiz — PBKDF2 ataylab sekin,
+# har bir create_user testni ~100ms ga sekinlashtiradi.
+# Bu FAQAT test rejimiga ta'sir qiladi, real baza xavfsiz qoladi.
+if 'test' in sys.argv:
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 # JWT sozlamalari
 from datetime import timedelta
