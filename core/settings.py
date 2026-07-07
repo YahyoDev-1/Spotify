@@ -156,6 +156,17 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ],
+    # Rate limiting: anonimlar IP bo'yicha, login qilganlar user ID bo'yicha sanaladi
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '60/min',      # mehmonlar: IP'dan minutiga 60 so'rov
+        'user': '120/min',     # login qilganlar: minutiga 120 so'rov
+        'login': '5/min',      # brute-force himoyasi: parolni 5 martadan ko'p "terib ko'rib" bo'lmaydi
+        'register': '10/hour', # bitta IP'dan ommaviy akkaunt ochishga qarshi
+    },
 }
 
 # JWT sozlamalari
