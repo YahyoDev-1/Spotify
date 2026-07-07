@@ -1,19 +1,35 @@
-# Create your views here.
-from django.contrib.admin import actions
+from django.db.models import Count, Q
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, get_object_or_404
+from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
-from rest_framework import filters
-from .models import *
-from .serializers import *
+
+from .models import Genre, Singer, Album, Song, Playlist, PlaylistSong, Like, Follow
+from .permissions import IsOwnerOrReadOnly
+from .serializers import (
+    GenreSerializer,
+    SingerSerializer,
+    AlbumSerializer,
+    SongSerializer,
+    PlaylistSerializer,
+)
+
+
+class GenreViewSet(ModelViewSet):
+    queryset = Genre.objects.all()
+    serializer_class = GenreSerializer
+    search_fields = ('name',)
 
 
 class SingerViewSet(ModelViewSet):
-    queryset = Singer.objects.all()
+    # annotate — obunachilar sonini SQL COUNT bilan hisoblaymiz (har singerga alohida so'rov emas).
+    # Diqqat: annotate GROUP BY yasagani uchun Meta.ordering bekor bo'ladi — qo'lda qaytaramiz
+    queryset = Singer.objects.annotate(followers_count=Count('followers')).order_by('name')
     serializer_class = SingerSerializer
- 
+    search_fields = ('name',)
+
     def get_serializer_class(self):
         # Action nomlariga qarab to'g'ri serializerlarni qaytaramiz
         if self.action in ['albums', 'add_album']:
@@ -43,19 +59,86 @@ class SingerViewSet(ModelViewSet):
         serializer.save(singer=singer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    # POST /singers/{id}/follow/ — obuna, DELETE — obunani bekor qilish
+    @action(
+        methods=['post', 'delete'],
+        detail=True,
+        permission_classes=(IsAuthenticated,),
+    )
+    def follow(self, request, pk):
+        singer = self.get_object()
+
+        if request.method == 'POST':
+            # get_or_create — ikkinchi marta bosilsa ham xato bermaydi (idempotent)
+            follow, created = Follow.objects.get_or_create(user=request.user, singer=singer)
+            if created:
+                return Response({'detail': f"{singer.name}ga obuna bo'ldingiz."}, status=status.HTTP_201_CREATED)
+            return Response({'detail': 'Siz allaqachon obunasiz.'}, status=status.HTTP_200_OK)
+
+        # DELETE
+        deleted, _ = Follow.objects.filter(user=request.user, singer=singer).delete()
+        if deleted:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': 'Siz bu artistga obuna emassiz.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # GET /singers/following/ — men obuna bo'lgan artistlar
+    @action(methods=['get'], detail=False, permission_classes=(IsAuthenticated,))
+    def following(self, request):
+        singers = self.get_queryset().filter(followers__user=request.user)
+        page = self.paginate_queryset(singers)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
 
 class SongViewSet(ModelViewSet):
-    queryset = Song.objects.all()
+    # select_related — album, singer va genre'ni bitta so'rovda olish (N+1 muammosini oldini oladi)
+    queryset = (
+        Song.objects
+        .select_related('album', 'album__singer', 'genre')
+        .annotate(likes_count=Count('likes'))
+        # annotate GROUP BY yasagani uchun Meta.ordering bekor bo'ladi — qo'lda qaytaramiz
+        .order_by('album', 'name')
+    )
     serializer_class = SongSerializer
-    filter_backends = (filters.SearchFilter, filters.OrderingFilter)
     search_fields = ('name',)
-    ordering_fields = ('duration',)
+    ordering_fields = ('duration', 'name', 'created_at')
     filterset_fields = ('genre', 'album')
+
+    # POST /songs/{id}/like/ — yoqtirish, DELETE — bekor qilish
+    @action(
+        methods=['post', 'delete'],
+        detail=True,
+        permission_classes=(IsAuthenticated,),
+    )
+    def like(self, request, pk):
+        song = self.get_object()
+
+        if request.method == 'POST':
+            like, created = Like.objects.get_or_create(user=request.user, song=song)
+            if created:
+                return Response({'detail': 'Qo\'shiq yoqtirilganlarga qo\'shildi.'}, status=status.HTTP_201_CREATED)
+            return Response({'detail': 'Siz allaqachon yoqtirgansiz.'}, status=status.HTTP_200_OK)
+
+        # DELETE
+        deleted, _ = Like.objects.filter(user=request.user, song=song).delete()
+        if deleted:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': 'Bu qo\'shiq yoqtirilganlarda yo\'q.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # GET /songs/liked/ — men yoqtirgan qo'shiqlar
+    @action(methods=['get'], detail=False, permission_classes=(IsAuthenticated,))
+    def liked(self, request):
+        songs = self.get_queryset().filter(likes__user=request.user)
+        page = self.paginate_queryset(songs)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class AlbumViewSet(ModelViewSet):
-    queryset = Album.objects.all()
+    queryset = Album.objects.select_related('singer')
     serializer_class = AlbumSerializer
+    search_fields = ('name',)
+    filterset_fields = ('singer',)
 
     def get_serializer_class(self):
         if self.action in ['songs', 'add_song']:
@@ -65,7 +148,95 @@ class AlbumViewSet(ModelViewSet):
     @action(methods=['get'], detail=True)
     def songs(self, request, pk):
         album = get_object_or_404(Album, pk=pk)
-        # related_name=songs orqali albumning qo'shiqlarini olamiz.
-        songs = album.songs.all()
+        # SongSerializer likes_count kutadi — shuning uchun bu yerda ham annotate qilamiz
+        songs = (
+            album.songs
+            .select_related('album', 'genre')
+            .annotate(likes_count=Count('likes'))
+        )
         serializer = SongSerializer(songs, many=True)
         return Response(serializer.data)
+
+
+class PlaylistViewSet(ModelViewSet):
+    serializer_class = PlaylistSerializer
+    # Global qoida ustiga object-level tekshiruv qo'shamiz
+    permission_classes = (IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly)
+    search_fields = ('name',)
+
+    def get_queryset(self):
+        # Yopiq (is_public=False) playlistlar faqat egasiga ko'rinadi.
+        # Bu XAVFSIZLIK filtri: begona odam uchun yopiq playlist "mavjud emas" (404)
+        queryset = (
+            Playlist.objects
+            .select_related('user')
+            .prefetch_related('playlist_songs__song__album')
+        )
+        if self.request.user.is_authenticated:
+            return queryset.filter(Q(is_public=True) | Q(user=self.request.user))
+        return queryset.filter(is_public=True)
+
+    def perform_create(self, serializer):
+        # Egasini KLIENT emas, TOKEN belgilaydi — soxtalashtirib bo'lmaydi
+        serializer.save(user=self.request.user)
+
+    # POST /playlists/{id}/add-song/  {"song_id": 5, "order": 3}
+    @action(methods=['post'], detail=True, url_path='add-song')
+    def add_song(self, request, pk):
+        # self.get_object() — get_queryset + IsOwnerOrReadOnly'dan o'tadi...
+        playlist = self.get_object()
+        # ...lekin bu GET emas, o'zgartirish — egaligini qo'lda tekshiramiz
+        if playlist.user != request.user:
+            return Response(
+                {'detail': 'Faqat o\'z playlistingizga qo\'shiq qo\'sha olasiz.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        song = get_object_or_404(Song, pk=request.data.get('song_id'))
+
+        # Tartib berilmasa — oxiriga qo'shamiz
+        order = request.data.get('order')
+        if order is None:
+            last = playlist.playlist_songs.order_by('-order').first()
+            order = (last.order + 1) if last else 1
+
+        playlist_song, created = PlaylistSong.objects.get_or_create(
+            playlist=playlist, song=song, defaults={'order': order},
+        )
+        if not created:
+            return Response(
+                {'detail': 'Bu qo\'shiq playlistda allaqachon bor.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # get_object() prefetch keshi o'zgarishdan OLDINGI holatni saqlab qolgan —
+        # yangilangan ro'yxatni ko'rsatish uchun obyektni qayta o'qiymiz
+        playlist = self.get_object()
+        return Response(self.get_serializer(playlist).data, status=status.HTTP_201_CREATED)
+
+    # POST /playlists/{id}/remove-song/  {"song_id": 5}
+    @action(methods=['post'], detail=True, url_path='remove-song')
+    def remove_song(self, request, pk):
+        playlist = self.get_object()
+        if playlist.user != request.user:
+            return Response(
+                {'detail': 'Faqat o\'z playlistingizdan qo\'shiq o\'chira olasiz.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        deleted, _ = playlist.playlist_songs.filter(song_id=request.data.get('song_id')).delete()
+        if not deleted:
+            return Response(
+                {'detail': 'Bu qo\'shiq playlistda yo\'q.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Prefetch keshi eskirgan — yangilangan holatni qayta o'qiymiz
+        playlist = self.get_object()
+        return Response(self.get_serializer(playlist).data, status=status.HTTP_200_OK)
+
+    # GET /playlists/my/ — faqat mening playlistlarim (yopiqlari bilan)
+    @action(methods=['get'], detail=False, permission_classes=(IsAuthenticated,))
+    def my(self, request):
+        playlists = self.get_queryset().filter(user=request.user)
+        page = self.paginate_queryset(playlists)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
