@@ -1,6 +1,7 @@
 from django.core.cache import cache
 from django.db.models import Count, Q
-from rest_framework import status
+from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
+from rest_framework import serializers, status
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
@@ -80,6 +81,15 @@ class SingerViewSet(ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     # POST /singers/{id}/follow/ — obuna, DELETE — obunani bekor qilish
+    @extend_schema(
+        request=None,  # tana talab qilinmaydi
+        responses={
+            201: OpenApiResponse(description='Obuna bo\'ldingiz'),
+            200: OpenApiResponse(description='Allaqachon obunasiz'),
+            204: OpenApiResponse(description='Obuna bekor qilindi'),
+            400: OpenApiResponse(description='Obuna bo\'lmagansiz'),
+        },
+    )
     @action(
         methods=['post', 'delete'],
         detail=True,
@@ -102,6 +112,7 @@ class SingerViewSet(ModelViewSet):
         return Response({'detail': 'Siz bu artistga obuna emassiz.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # GET /singers/following/ — men obuna bo'lgan artistlar
+    @extend_schema(responses=SingerSerializer(many=True))
     @action(methods=['get'], detail=False, permission_classes=(IsAuthenticated,))
     def following(self, request):
         singers = self.get_queryset().filter(followers__user=request.user)
@@ -136,6 +147,7 @@ class SongViewSet(ModelViewSet):
         return Response(data)
 
     # GET /songs/popular/ — eng ko'p like olgan 10 ta qo'shiq
+    @extend_schema(responses=SongSerializer(many=True))
     @action(methods=['get'], detail=False)
     def popular(self, request):
         key = songs_popular_key()
@@ -148,6 +160,15 @@ class SongViewSet(ModelViewSet):
         return Response(data)
 
     # POST /songs/{id}/like/ — yoqtirish, DELETE — bekor qilish
+    @extend_schema(
+        request=None,
+        responses={
+            201: OpenApiResponse(description='Yoqtirilganlarga qo\'shildi'),
+            200: OpenApiResponse(description='Allaqachon yoqtirgansiz'),
+            204: OpenApiResponse(description='Yoqtirish bekor qilindi'),
+            400: OpenApiResponse(description='Yoqtirilganlarda yo\'q'),
+        },
+    )
     @action(
         methods=['post', 'delete'],
         detail=True,
@@ -169,6 +190,7 @@ class SongViewSet(ModelViewSet):
         return Response({'detail': 'Bu qo\'shiq yoqtirilganlarda yo\'q.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # GET /songs/liked/ — men yoqtirgan qo'shiqlar
+    @extend_schema(responses=SongSerializer(many=True))
     @action(methods=['get'], detail=False, permission_classes=(IsAuthenticated,))
     def liked(self, request):
         songs = self.get_queryset().filter(likes__user=request.user)
@@ -224,6 +246,17 @@ class PlaylistViewSet(ModelViewSet):
         serializer.save(user=self.request.user)
 
     # POST /playlists/{id}/add-song/  {"song_id": 5, "order": 3}
+    @extend_schema(
+        request=inline_serializer(
+            name='AddSongRequest',
+            fields={
+                'song_id': serializers.IntegerField(),
+                'order': serializers.IntegerField(required=False),
+            },
+        ),
+        responses={201: PlaylistSerializer, 400: OpenApiResponse(description='Allaqachon bor'),
+                   403: OpenApiResponse(description='Sizniki emas')},
+    )
     @action(methods=['post'], detail=True, url_path='add-song')
     def add_song(self, request, pk):
         # self.get_object() — get_queryset + IsOwnerOrReadOnly'dan o'tadi...
@@ -257,6 +290,14 @@ class PlaylistViewSet(ModelViewSet):
         return Response(self.get_serializer(playlist).data, status=status.HTTP_201_CREATED)
 
     # POST /playlists/{id}/remove-song/  {"song_id": 5}
+    @extend_schema(
+        request=inline_serializer(
+            name='RemoveSongRequest',
+            fields={'song_id': serializers.IntegerField()},
+        ),
+        responses={200: PlaylistSerializer, 400: OpenApiResponse(description='Playlistda yo\'q'),
+                   403: OpenApiResponse(description='Sizniki emas')},
+    )
     @action(methods=['post'], detail=True, url_path='remove-song')
     def remove_song(self, request, pk):
         playlist = self.get_object()
@@ -277,6 +318,7 @@ class PlaylistViewSet(ModelViewSet):
         return Response(self.get_serializer(playlist).data, status=status.HTTP_200_OK)
 
     # GET /playlists/my/ — faqat mening playlistlarim (yopiqlari bilan)
+    @extend_schema(responses=PlaylistSerializer(many=True))
     @action(methods=['get'], detail=False, permission_classes=(IsAuthenticated,))
     def my(self, request):
         playlists = self.get_queryset().filter(user=request.user)

@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'django_countries',
     'django_filters',
+    'drf_spectacular',
 ]
 
 # Standart User o'rniga o'zimizning modelni ishlatamiz
@@ -157,6 +158,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ],
+    # drf-spectacular endpointlarni tahlil qilib OpenAPI sxema tuzadi
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     # Rate limiting: anonimlar IP bo'yicha, login qilganlar user ID bo'yicha sanaladi
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
@@ -168,6 +171,25 @@ REST_FRAMEWORK = {
         'login': '5/min',      # brute-force himoyasi: parolni 5 martadan ko'p "terib ko'rib" bo'lmaydi
         'register': '10/hour', # bitta IP'dan ommaviy akkaunt ochishga qarshi
     },
+}
+
+# drf-spectacular (OpenAPI / Swagger) sozlamalari
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Spotify Clone API',
+    'DESCRIPTION': 'Qo\'shiqlar, albomlar, playlistlar, like va follow uchun REST API. '
+                   'Autentifikatsiya JWT (Bearer token) orqali.',
+    'VERSION': '1.0.0',
+    # Sxema JSON'ini alohida "/schema/" ostida qoldiramiz, Swagger UI'da ko'rsatmaymiz
+    'SERVE_INCLUDE_SCHEMA': False,
+    # Endpointlar URL bo'yicha guruhlanadi (auth, songs, playlists, ...)
+    'TAGS': [
+        {'name': 'auth', 'description': 'Ro\'yxatdan o\'tish, login, token yangilash, profil'},
+        {'name': 'genres', 'description': 'Janrlar'},
+        {'name': 'singers', 'description': 'Qo\'shiqchilar va obuna (follow)'},
+        {'name': 'albums', 'description': 'Albomlar'},
+        {'name': 'songs', 'description': 'Qo\'shiqlar, like va mashhurlar'},
+        {'name': 'playlists', 'description': 'Playlistlar va ulardagi qo\'shiqlar'},
+    ],
 }
 
 # Kesh: .env'da REDIS_URL berilsa — Redis (production),

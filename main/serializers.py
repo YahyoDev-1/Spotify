@@ -115,6 +115,7 @@ class PlaylistSerializer(serializers.ModelSerializer):
         model = Playlist
         fields = ('id', 'name', 'user', 'is_public', 'songs_count', 'songs', 'created_at')
 
-    def get_songs_count(self, obj):
+    def get_songs_count(self, obj) -> int:
+        # -> int type hint: drf-spectacular sxemada to'g'ri "integer" deb belgilaydi.
         # len() ishlatamiz — prefetch qilingan ro'yxatni sanaydi, yangi SQL yubormaydi
         return len(obj.playlist_songs.all())
