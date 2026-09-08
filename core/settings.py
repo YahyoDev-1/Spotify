@@ -138,6 +138,17 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Fayl yuklash himoyasi (so'rov darajasi)
+# DATA_UPLOAD_MAX_MEMORY_SIZE — fayl BO'LMAGAN POST ma'lumot hajmi chegarasi (2.5 MB).
+# Har bir faylning o'z hajm chegarasi model validatorida (Song 20MB, Album 5MB).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024  # 5 MB
+# FILE_UPLOAD_MAX_MEMORY_SIZE — shu hajmdan katta fayl xotira o'rniga vaqtinchalik
+# diskka yoziladi (RAM'ni tejaydi). Bu CHEGARA emas, faqat spool ostonasi.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024  # 5 MB
+# ESLATMA: haqiqiy "so'rov tanasi juda katta" himoyasi production'da web-server
+# darajasida bo'ladi (nginx: client_max_body_size 25m;) — Django validatori
+# fayl to'liq qabul qilingandan keyin ishlaydi.
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

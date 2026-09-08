@@ -2,12 +2,40 @@ import datetime
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import Genre, Singer, Album, Song, Playlist, PlaylistSong, Like, Follow
+from .validators import MaxFileSizeValidator
 
 User = get_user_model()
+
+
+class _FakeFile:
+    """Validatorni tekshirish uchun soxta fayl — faqat .size kerak"""
+    def __init__(self, size):
+        self.size = size
+
+
+class MaxFileSizeValidatorTests(SimpleTestCase):
+    """Validator mantiqini bevosita (unit) tekshiramiz — baza kerak emas"""
+
+    def test_under_limit_passes(self):
+        validator = MaxFileSizeValidator(max_mb=5)
+        validator(_FakeFile(size=4 * 1024 * 1024))  # 4 MB — xato bo'lmasligi kerak
+
+    def test_over_limit_raises(self):
+        validator = MaxFileSizeValidator(max_mb=5)
+        with self.assertRaises(ValidationError):
+            validator(_FakeFile(size=6 * 1024 * 1024))  # 6 MB
+
+    def test_equal_validators_compare(self):
+        # @deconstructible + __eq__ — migratsiya "o'zgardimi?" ni to'g'ri aniqlaydi
+        self.assertEqual(MaxFileSizeValidator(max_mb=20), MaxFileSizeValidator(max_mb=20))
+        self.assertNotEqual(MaxFileSizeValidator(max_mb=20), MaxFileSizeValidator(max_mb=5))
 
 
 class CatalogFixtureMixin:
@@ -77,6 +105,28 @@ class CatalogTests(CatalogFixtureMixin, APITestCase):
 
         self.assertEqual(response.json()['count'], 1)
         self.assertEqual(response.json()['results'][0]['name'], 'Rock qoshiq')
+
+    def test_oversized_song_file_rejected(self):
+        """20 MB dan katta audio fayl API darajasida rad etilishi kerak.
+
+        Fayl-darajasidagi validator (hajm) mutagen tekshiruvidan OLDIN ishlaydi,
+        shuning uchun soxta (audio bo'lmagan) katta fayl ham shu bosqichda tushadi.
+        """
+        self.client.force_authenticate(user=self.owner)
+        big_file = SimpleUploadedFile(
+            'katta.mp3',
+            b'\x00' * (21 * 1024 * 1024),  # 21 MB
+            content_type='audio/mpeg',
+        )
+
+        response = self.client.post(
+            '/songs/',
+            {'name': 'Katta', 'genre': self.genre.name, 'album': self.album.name, 'file': big_file},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('file', response.json())
 
 
 class PlaylistTests(CatalogFixtureMixin, APITestCase):

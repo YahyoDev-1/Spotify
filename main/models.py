@@ -5,6 +5,8 @@ from django.core.validators import (
 )
 from django_countries.fields import CountryField
 
+from .validators import MaxFileSizeValidator
+
 
 class Genre(models.Model):
     """Janr modeli — varchar takrorlash o'rniga alohida jadval (normalizatsiya)"""
@@ -55,7 +57,14 @@ class Album(models.Model):
         upload_to='albums/%Y/%m/%d/',
         blank=True,
         null=True,
-        help_text='Album muqovasi'
+        validators=[
+            FileExtensionValidator(
+                allowed_extensions=['jpg', 'jpeg', 'png', 'webp'],
+                message='Ruxsat: JPG, JPEG, PNG, WEBP'
+            ),
+            MaxFileSizeValidator(max_mb=5),  # muqova rasmi — ko'pi bilan 5 MB
+        ],
+        help_text='Album muqovasi (max 5 MB)'
     )
     release_date = models.DateField(
         blank=True,
@@ -108,9 +117,10 @@ class Song(models.Model):
             FileExtensionValidator(
                 allowed_extensions=['mp3', 'wav', 'flac', 'aac'],
                 message='Ruxsat: MP3, WAV, FLAC, AAC'
-            )
+            ),
+            MaxFileSizeValidator(max_mb=20),  # audio fayl — ko'pi bilan 20 MB
         ],
-        help_text='Audio fayli'
+        help_text='Audio fayli (max 20 MB)'
     )
     album = models.ForeignKey(
         Album,
